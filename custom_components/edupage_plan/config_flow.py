@@ -184,9 +184,15 @@ class EdupagePlanOptionsFlow(config_entries.OptionsFlow):
         try:
             tables = await async_fetch_timetable(session, current[CONF_SUBDOMAIN])
             self._divisions = get_class_divisions(tables, current[CONF_CLASS_ID])
-        except (EdupageApiError, aiohttp.ClientError):
-            # EduPage chwilowo niedostępny - i tak pokażemy resztę ustawień,
-            # tylko bez możliwości zmiany grup w tym oknie.
+        except Exception:  # noqa: BLE001 - jakikolwiek błąd tego "na żywo" zapytania (nie tylko
+            # EdupageApiError/aiohttp.ClientError - np. niespodziewany kształt odpowiedzi) nie
+            # może wywalić całego okna opcji 500-tką - i tak pokazujemy resztę ustawień, tylko
+            # bez możliwości zmiany grup w tym oknie.
+            _LOGGER.exception(
+                "Nie udało się dociągnąć na żywo podziałów grup w opcjach integracji (%s / %s)",
+                current.get(CONF_SUBDOMAIN),
+                current.get(CONF_CLASS_ID),
+            )
             self._divisions = []
 
         existing_choices = current.get(CONF_GROUP_CHOICES, {})
