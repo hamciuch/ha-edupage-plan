@@ -133,9 +133,17 @@ class EdupageLunchSensor(SensorEntity):
         return self._week.get(weekday, {}).get(key)
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> str:
         rng = self._today_range()
-        return rng.split("-")[0] if rng else None
+        if rng:
+            return rng.split("-")[0]
+        # Brak wpisu na dziś - najczęściej weekend (szkoła nie publikuje obiadów na
+        # sobotę/niedzielę), ale samo "unknown" w HA wygląda jak błąd integracji,
+        # więc zwracamy czytelny komunikat zamiast None.
+        weekday = dt_util.now().weekday()
+        if weekday >= 5:
+            return "Brak (weekend)"
+        return "Brak danych na dziś"
 
     @property
     def extra_state_attributes(self) -> dict:
