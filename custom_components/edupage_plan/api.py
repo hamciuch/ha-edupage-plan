@@ -7,7 +7,16 @@ Strona ta (widget "TTViewer") pobiera CAŁY plan szkoły jednym zapytaniem:
     POST /timetable/server/regulartt.js?__func=regularttGetData
     body: {"__args": [null, "<tt_num>"], "__gsh": "00000000"}
 
-gdzie <tt_num> to numer aktualnie obowiązującego planu (patrz `async_get_default_tt_num`).
+gdzie <tt_num> to numer aktualnie obowiązującego planu, pobierany osobnym
+wywołaniem (patrz `async_get_default_tt_num`):
+
+    POST /timetable/server/ttviewer.js?__func=getTTViewerData
+    body: {"__args": [null, <rok_szkolny:int>], "__gsh": "00000000"}
+
+(oba kształty zapytań potwierdzone przez odczytanie prawdziwego kodu klienta
+EduPage - `/timetable/ttviewer.js` i `/global/pics/js/bundles/bundle_main.min.js`
+- a nie zgadywane, bo drugi z nich łatwo zgadnąć źle: wymaga roku szkolnego
+jako LICZBY, nie samego `null`).
 Odpowiedź to samoopisujący się zrzut bazy (DBI) - lista tabel, każda z
 `data_columns` (kolejność pól) i `data_rows` (wiersze). Nie trzeba się logować
 ani znać danych żadnego ucznia - to są dane całej szkoły (klasy, przedmioty,
@@ -32,6 +41,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import aiohttp
@@ -92,14 +102,35 @@ def _parse_dbi_tables(raw_json: dict[str, Any]) -> EdupageTables:
     return EdupageTables(raw=raw_json, tables=parsed)
 
 
+def _current_school_year(today: date | None = None) -> int:
+    """Polski rok szkolny nazywany jest rokiem jego ROZPOCZĘCIA (np. 2026/2027 -> 2026).
+
+    EduPage liczy to tak samo: przełom to wrzesień - od września do sierpnia
+    to ten sam "school year" (patrz `req.getSchoolYear()` w kliencie EduPage).
+    """
+    today = today or date.today()
+    return today.year if today.month >= 9 else today.year - 1
+
+
 async def async_get_default_tt_num(session: aiohttp.ClientSession, subdomain: str) -> str:
-    """Pyta EduPage, jaki jest numer aktualnie obowiązującego planu (regular.default_num)."""
+    """Pyta EduPage, jaki jest numer aktualnie obowiązującego planu (regular.default_num).
+
+    WAŻNE: to wywołanie wymaga DWÓCH argumentów - (null, rok_szkolny) - inaczej
+    EduPage odpowiada błędem. Ustalone przez podejrzenie prawdziwego kodu klienta
+    (plik /timetable/ttviewer.js: `getTTViewerData(null, year)`, gdzie `year` to
+    liczba całkowita, NIE string) - samo zgadywanie kształtu requestu zawodziło.
+    """
     url = TTVIEWER_ENDPOINT.format(subdomain=subdomain)
-    body = {"__args": [None], "__gsh": PUBLIC_GSH}
+    body = {"__args": [None, _current_school_year()], "__gsh": PUBLIC_GSH}
     async with session.post(url, json=body, timeout=aiohttp.ClientTimeout(total=20)) as resp:
         if resp.status != 200:
             raise EdupageApiError(f"getTTViewerData HTTP {resp.status}")
         data = await resp.json(content_type=None)
+
+    if data.get("e") or data.get("reload"):
+        raise EdupageApiError(
+            f"EduPage odrzuciło zapytanie o aktualny plan (getTTViewerData): {data}"
+        )
 
     try:
         return data["r"]["regular"]["default_num"]
@@ -129,10 +160,11 @@ async def async_fetch_timetable(
     except aiohttp.ClientError as err:
         raise EdupageApiError(f"Błąd sieci przy pobieraniu planu EduPage: {err}") from err
 
-    if data.get("reload"):
-        # Serwer prosi o "świeże" zapytanie - najczęściej brakujący/niewłaściwy tt_num.
+    if data.get("e") or data.get("reload"):
+        # Serwer prosi o "świeże" zapytanie albo zwrócił błąd - najczęściej
+        # brakujący/niewłaściwy tt_num.
         raise EdupageApiError(
-            "EduPage poprosił o ponowne załadowanie strony (reload) - sprawdź numer planu (tt_num)."
+            f"EduPage odrzuciło zapytanie o plan lekcji (regularttGetData): {data}"
         )
 
     return _parse_dbi_tables(data)

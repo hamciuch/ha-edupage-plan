@@ -1,0 +1,108 @@
+views:
+  - title: Plan lekcji
+    path: plan-lekcji
+    icon: mdi:school
+    cards:
+      - type: horizontal-stack
+        cards:
+          - type: markdown
+            content: >
+              ## 👦 Wiktor
+
+              <span style="font-size:1.3em;font-weight:bold;color:{{
+              state_attr('sensor.aktualna_lekcja_wiktor','kolor') or
+              'var(--primary-text-color)' }}">{{
+              states('sensor.aktualna_lekcja_wiktor') }}</span>
+
+              {% set sala = state_attr('sensor.aktualna_lekcja_wiktor','sala') %}
+              {% set nau = state_attr('sensor.aktualna_lekcja_wiktor','nauczyciel') %}
+              {% set grp = state_attr('sensor.aktualna_lekcja_wiktor','grupa') %}
+              {% if sala or nau %}
+              <small>{{ sala }}{% if nau %} • {{ nau }}{% endif %}{% if grp %} • {{ grp }}{% endif %}</small>
+              {% endif %}
+
+              ---
+
+              **Następna:** {{ states('sensor.nastepna_lekcja_wiktor') }}
+              {% set nstart = state_attr('sensor.nastepna_lekcja_wiktor','start') %}
+              {% if nstart %}(od {{ as_timestamp(nstart) | timestamp_custom('%H:%M') }}){% endif %}
+          - type: markdown
+            content: >
+              ## 👧 Gabrysia
+
+              <span style="font-size:1.3em;font-weight:bold;color:{{
+              state_attr('sensor.aktualna_lekcja_gabrysia','kolor') or
+              'var(--primary-text-color)' }}">{{
+              states('sensor.aktualna_lekcja_gabrysia') }}</span>
+
+              {% set sala = state_attr('sensor.aktualna_lekcja_gabrysia','sala') %}
+              {% set nau = state_attr('sensor.aktualna_lekcja_gabrysia','nauczyciel') %}
+              {% set grp = state_attr('sensor.aktualna_lekcja_gabrysia','grupa') %}
+              {% if sala or nau %}
+              <small>{{ sala }}{% if nau %} • {{ nau }}{% endif %}{% if grp %} • {{ grp }}{% endif %}</small>
+              {% endif %}
+
+              ---
+
+              **Następna:** {{ states('sensor.nastepna_lekcja_gabrysia') }}
+              {% set nstart = state_attr('sensor.nastepna_lekcja_gabrysia','start') %}
+              {% if nstart %}(od {{ as_timestamp(nstart) | timestamp_custom('%H:%M') }}){% endif %}
+
+      - type: entities
+        title: Obiad
+        show_header_toggle: false
+        entities:
+          - entity: sensor.godzina_obiadu_wiktor
+            name: Wiktor
+            icon: mdi:food
+          - entity: sensor.godzina_obiadu_gabrysia
+            name: Gabrysia
+            icon: mdi:food
+
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: binary_sensor.kolizja_zajec_z_lekcja_wiktor
+            state: "on"
+        card:
+          type: markdown
+          content: >
+            ### ⚠️ Kolizja zajęć — Wiktor
+
+            {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_wiktor','kolidujace_zajecia') or [] %}
+            - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
+              ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
+            {% endfor %}
+
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: binary_sensor.kolizja_zajec_z_lekcja_gabrysia
+            state: "on"
+        card:
+          type: markdown
+          content: >
+            ### ⚠️ Kolizja zajęć — Gabrysia
+
+            {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_gabrysia','kolidujace_zajecia') or [] %}
+            - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
+              ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
+            {% endfor %}
+
+      - type: calendar
+        title: Plan lekcji — tydzień
+        initial_view: dayGridWeek
+        entities:
+          - entity: calendar.plan_lekcji_wiktor
+            color: "#3B82F6"
+          - entity: calendar.plan_lekcji_gabrysia
+            color: "#EC4899"
+
+      - type: calendar
+        title: Zajęcia dodatkowe (bez kolizji)
+        initial_view: listWeek
+        entities:
+          - entity: calendar.zajecia_dodatkowe_bez_kolizji_wiktor
+            color: "#3B82F6"
+          - entity: calendar.zajecia_dodatkowe_bez_kolizji_gabrysia
+            color: "#EC4899"
