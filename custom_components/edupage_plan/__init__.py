@@ -22,9 +22,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Wybory grup / kalendarz dodatkowych zajęć zmienione w opcjach -> odśwież dane."""
-    coordinator: EdupagePlanCoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.async_request_refresh()
+    """Opcje integracji się zmieniły (wybory grup, plik obiadów, kalendarz dodatkowych zajęć).
+
+    WAŻNE: samo odświeżenie coordinatora (async_request_refresh) NIE wystarczy -
+    encje takie jak sensor godziny obiadu, kalendarz "zajęcia dodatkowe bez
+    kolizji" czy binary_sensor kolizji są tworzone WARUNKOWO, tylko raz, w
+    async_setup_entry każdej platformy (patrz sensor.py/calendar.py/
+    binary_sensor.py) - jeśli dana opcja nie była ustawiona przy tamtym
+    pierwszym uruchomieniu, taka encja nigdy się nie pojawi, choćbyśmy
+    dowolną ilość razy odświeżali coordinator. Trzeba przeładować cały wpis
+    konfiguracji, żeby platformy zostały ponownie skonfigurowane z aktualnymi
+    opcjami i domotworzyły/usunęły encje zależne od opcji.
+    """
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
