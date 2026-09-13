@@ -23,6 +23,12 @@ from .coordinator import EdupagePlanCoordinator, LessonOccurrence
 
 
 def _occ_to_event(occ: LessonOccurrence) -> CalendarEvent:
+    # Sala dopisana WPROST do tytułu wydarzenia - karta "calendar" w widoku
+    # tygodnia/miesiąca pokazuje tylko summary, a "location" widać dopiero po
+    # kliknięciu w wydarzenie. Skoro sala bywa ważna (zmienia się od starszych
+    # klas w górę), ma być widoczna od razu, bez klikania.
+    summary = f"{occ.subject} (sala {occ.room})" if occ.room else occ.subject
+
     description_bits = []
     if occ.teacher:
         description_bits.append(f"Nauczyciel: {occ.teacher}")
@@ -31,7 +37,7 @@ def _occ_to_event(occ: LessonOccurrence) -> CalendarEvent:
     return CalendarEvent(
         start=occ.start,
         end=occ.end,
-        summary=occ.subject,
+        summary=summary,
         location=occ.room or None,
         description=" | ".join(description_bits) or None,
     )
@@ -86,7 +92,7 @@ class EdupagePlanCalendar(CalendarEntity):
 class EdupageExtraActivitiesCalendar(CalendarEntity):
     """Widok kalendarza dodatkowych zajęć BEZ tych, które kolidują z lekcją.
 
-    Nie modyfikuje oryginalnego kalendarza użytkownika - koliduj±ce wydarzenia
+    Nie modyfikuje oryginalnego kalendarza użytkownika - kolidujące wydarzenia
     są tu po prostu pomijane (wygaszone). Zobacz też binary_sensor - kolizja.
     """
 
