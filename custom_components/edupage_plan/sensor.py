@@ -8,9 +8,10 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
+from homeassistant.util import dt as dt_util
 
-from .const import CONF_CLASS_NAME, CONF_LUNCH_DOCX_PATH, CONF_STUDENT_NAME, DOMAIN
+from .const import CONF_CLASS_NAME, CONF_LUNCH_DOCX_PATH, CONF_STUDENT_NAME, DOMAIN, WEEKDAYS_PL
 from .coordinator import EdupagePlanCoordinator, LessonOccurrence
 from .lunch import parse_lunch_docx
 
@@ -101,7 +102,16 @@ class EdupageNextLessonSensor(_BaseLessonSensor):
 
 
 class EdupageLunchSensor(SensorEntity):
-    """Godzina obiadu w stołówce - odczytana lokalnie z pliku .docx (patrz lunch.py)."""
+    """Godzina obiadu w stołówce - odczytana lokalnie z pliku .docx (patrz lunch.py).
+
+    Prawdziwy harmonogram szkoły bywa RÓŻNY w różne dni tygodnia dla tej samej
+    klasy (np. 2A je obiad o innej godzinie w poniedziałek niż w piątek) -
+    dlatego trzymamy CAŁY tydzień (`self._week`) i za każdym razem wyliczamy
+    wartość na DZISIAJ (`dt_util.now().weekday()`), zamiast jednej stałej
+    godziny. Odświeżamy plik co 12h (na wypadek aktualizacji przez szkołę)
+    i dodatkowo tuż po północy, żeby stan sam się przełączył na nowy dzień
+    bez czekania na najbliższe 12-godzinne odświeżenie.
+    """
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:food"
@@ -113,16 +123,39 @@ class EdupageLunchSensor(SensorEntity):
         student = ({**entry.data, **entry.options}).get(CONF_STUDENT_NAME, entry.title)
         self._attr_unique_id = f"{entry.entry_id}_obiad"
         self._attr_name = f"Godzina obiadu - {student}"
-        self._lunch_time: str | None = None
+        self._week: dict[int, dict[str, str]] = {}
+
+    def _today_range(self) -> str | None:
+        opts = {**self._entry.data, **self._entry.options}
+        class_name = opts.get(CONF_CLASS_NAME, "")
+        key = class_name.replace(" ", "").upper()
+        weekday = dt_util.now().weekday()
+        return self._week.get(weekday, {}).get(key)
 
     @property
     def native_value(self) -> str | None:
-        return self._lunch_time
+        rng = self._today_range()
+        return rng.split("-")[0] if rng else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        weekday = dt_util.now().weekday()
+        attrs: dict = {"dzien_tygodnia": WEEKDAYS_PL[weekday] if weekday < len(WEEKDAYS_PL) else None}
+        rng = self._today_range()
+        if rng:
+            start, end = rng.split("-")
+            attrs["poczatek"] = start
+            attrs["koniec"] = end
+            attrs["zakres"] = rng
+        return attrs
 
     async def async_added_to_hass(self) -> None:
-        await self._async_refresh(None)
+        await self._async_do_refresh()
         self.async_on_remove(
             async_track_time_interval(self.hass, self._async_refresh, LUNCH_REFRESH_INTERVAL)
+        )
+        self.async_on_remove(
+            async_track_time_change(self.hass, self._async_refresh, hour=0, minute=1, second=0)
         )
 
     @callback
@@ -132,12 +165,9 @@ class EdupageLunchSensor(SensorEntity):
     async def _async_do_refresh(self) -> None:
         opts = {**self._entry.data, **self._entry.options}
         path = opts.get(CONF_LUNCH_DOCX_PATH)
-        class_name = opts.get(CONF_CLASS_NAME, "")
         if not path:
             return
-        table = await self.hass.async_add_executor_job(parse_lunch_docx, path)
-        key = class_name.replace(" ", "").upper()
-        new_value = table.get(key)
-        if new_value != self._lunch_time:
-            self._lunch_time = new_value
-            self.async_write_ha_state()
+        new_week = await self.hass.async_add_executor_job(parse_lunch_docx, path)
+        if new_week != self._week:
+            self._week = new_week
+        self.async_write_ha_state()

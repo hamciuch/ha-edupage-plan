@@ -48,6 +48,12 @@ views:
               {% set nstart = state_attr('sensor.nastepna_lekcja_gabrysia','start') %}
               {% if nstart %}(od {{ as_timestamp(nstart) | timestamp_custom('%H:%M') }}){% endif %}
 
+      # Godzina obiadu - encja powstaje DOPIERO gdy w opcjach integracji (dla KAŻDEGO
+      # dziecka osobno) wskażesz ścieżkę do pliku .docx z harmonogramem stołówki
+      # (Ustawienia -> Urządzenia i usługi -> Plan lekcji EduPage -> [dziecko] ->
+      # Konfiguruj -> "Ścieżka do pliku .docx..."). Dopóki tego nie zrobisz dla
+      # danego dziecka, ta karta pokaże "Nie znaleziono encji" dla niego - to
+      # oczekiwane, nie błąd.
       - type: entities
         title: Obiad
         show_header_toggle: false
@@ -59,36 +65,6 @@ views:
             name: Gabrysia
             icon: mdi:food
 
-      - type: conditional
-        conditions:
-          - condition: state
-            entity: binary_sensor.kolizja_zajec_z_lekcja_wiktor
-            state: "on"
-        card:
-          type: markdown
-          content: >
-            ### ⚠️ Kolizja zajęć — Wiktor
-
-            {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_wiktor','kolidujace_zajecia') or [] %}
-            - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
-              ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
-            {% endfor %}
-
-      - type: conditional
-        conditions:
-          - condition: state
-            entity: binary_sensor.kolizja_zajec_z_lekcja_gabrysia
-            state: "on"
-        card:
-          type: markdown
-          content: >
-            ### ⚠️ Kolizja zajęć — Gabrysia
-
-            {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_gabrysia','kolidujace_zajecia') or [] %}
-            - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
-              ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
-            {% endfor %}
-
       - type: calendar
         title: Plan lekcji — tydzień
         initial_view: dayGridWeek
@@ -98,11 +74,49 @@ views:
           - entity: calendar.plan_lekcji_gabrysia
             color: "#EC4899"
 
-      - type: calendar
-        title: Zajęcia dodatkowe (bez kolizji)
-        initial_view: listWeek
-        entities:
-          - entity: calendar.zajecia_dodatkowe_bez_kolizji_wiktor
-            color: "#3B82F6"
-          - entity: calendar.zajecia_dodatkowe_bez_kolizji_gabrysia
-            color: "#EC4899"
+      # --- Poniższe karty DOPISZ dopiero wtedy, gdy skonfigurujesz w opcjach
+      # integracji "Kalendarz z dodatkowymi zajęciami" (CONF_EXTRA_CALENDAR_ENTITY)
+      # dla danego dziecka - wskazujesz tam SWÓJ WŁASNY kalendarz HA (np. z
+      # integracji "Kalendarz lokalny"), do którego sam dodajesz kółka/korepetycje.
+      # Dopóki tej opcji nie ustawisz, encje calendar.zajecia_dodatkowe_bez_kolizji_*
+      # i binary_sensor.kolizja_zajec_z_lekcja_* W OGÓLE NIE ISTNIEJĄ - stąd puste,
+      # wiecznie "ładujące się" karty, gdybyś je tu wkleił(a) za wcześnie.
+      #
+      # - type: conditional
+      #   conditions:
+      #     - condition: state
+      #       entity: binary_sensor.kolizja_zajec_z_lekcja_wiktor
+      #       state: "on"
+      #   card:
+      #     type: markdown
+      #     content: >
+      #       ### ⚠️ Kolizja zajęć — Wiktor
+      #
+      #       {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_wiktor','kolidujace_zajecia') or [] %}
+      #       - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
+      #         ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
+      #       {% endfor %}
+      #
+      # - type: conditional
+      #   conditions:
+      #     - condition: state
+      #       entity: binary_sensor.kolizja_zajec_z_lekcja_gabrysia
+      #       state: "on"
+      #   card:
+      #     type: markdown
+      #     content: >
+      #       ### ⚠️ Kolizja zajęć — Gabrysia
+      #
+      #       {% for k in state_attr('binary_sensor.kolizja_zajec_z_lekcja_gabrysia','kolidujace_zajecia') or [] %}
+      #       - **{{ k.zajecia }}** koliduje z lekcją **{{ k.lekcja }}**
+      #         ({{ as_timestamp(k.lekcja_start) | timestamp_custom('%H:%M') }})
+      #       {% endfor %}
+      #
+      # - type: calendar
+      #   title: Zajęcia dodatkowe (bez kolizji)
+      #   initial_view: listWeek
+      #   entities:
+      #     - entity: calendar.zajecia_dodatkowe_bez_kolizji_wiktor
+      #       color: "#3B82F6"
+      #     - entity: calendar.zajecia_dodatkowe_bez_kolizji_gabrysia
+      #       color: "#EC4899"
