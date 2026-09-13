@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Plan lekcji EduPage - nowy uczeń",
+        "description": "Podaj subdomenę szkoły z adresu publicznego planu (np. dla https://promienista.edupage.org wpisz \"promienista\") oraz imię dziecka.",
+        "data": {
+          "subdomain": "Subdomena EduPage",
+          "student_name": "Imię dziecka"
+        }
+      },
+      "class": {
+        "title": "Wybierz klasę",
+        "data": {
+          "class_id": "Oddział (klasa)"
+        }
+      },
+      "division": {
+        "title": "Wybór grupy",
+        "description": "Ten oddział ma podział na grupy (np. informatyka, drugi język, WF, religia/etyka). Wybierz grupę Twojego dziecka."
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się pobrać planu lekcji z EduPage - sprawdź subdomenę i połączenie."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ustawienia planu lekcji",
+        "data": {
+          "extra_calendar_entity_id": "Kalendarz z dodatkowymi zajęciami (opcjonalnie)",
+          "lunch_docx_path": "Ścieżka do pliku .docx z harmonogramem obiadów (opcjonalnie)"
+        }
+      }
+    }
+  }
+}
