@@ -153,7 +153,7 @@ class EdupagePlanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "EdupagePlanOptionsFlow":
-        return EdupagePlanOptionsFlow(config_entry)
+        return EdupagePlanOptionsFlow()
 
 
 class EdupagePlanOptionsFlow(config_entries.OptionsFlow):
@@ -162,10 +162,17 @@ class EdupagePlanOptionsFlow(config_entries.OptionsFlow):
     Podziały klasy (informatyka, drugi język, WF, religia/etyka...) są dociągane
     na żywo z EduPage, więc jeśli szkoła zmieni podział grup w trakcie roku,
     wystarczy ponownie otworzyć te opcje.
+
+    WAŻNE: od pewnej wersji Home Assistant `config_entry` w klasie bazowej
+    OptionsFlow jest właściwością BEZ settera, ustawianą samodzielnie przez
+    HA (na podstawie kontekstu flow) - integracja nie może już sama robić
+    `self.config_entry = config_entry` w __init__ (to właśnie powodowało
+    "AttributeError: property 'config_entry' ... has no setter" i błąd 500
+    przy każdym otwarciu "Konfiguruj"). Wystarczy NIE nadpisywać tego pola -
+    `self.config_entry` odziedziczone z klasy bazowej działa samo.
     """
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    def __init__(self) -> None:
         self._divisions: list[dict] = []
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
