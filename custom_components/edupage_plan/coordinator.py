@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import EdupageApiError, EdupageTables, async_fetch_timetable
 from .const import (
@@ -211,8 +212,15 @@ def build_student_schedule(
         current_date = today + timedelta(days=day_offset)
         weekday = current_date.weekday()  # 0=poniedziałek, tak samo jak w danych EduPage
         for tmpl in weekday_occ_templates.get(weekday, []):
-            start_dt = datetime.combine(current_date, _parse_hhmm(tmpl["start_time"]))
-            end_dt = datetime.combine(current_date, _parse_hhmm(tmpl["end_time"]))
+            # WAŻNE: Home Assistant (CalendarEvent) wymaga dat ZE STREFĄ CZASOWĄ - naiwny
+            # datetime powoduje wyjątek przy tworzeniu wydarzenia i całą encję kalendarza
+            # znika (HA oznacza ją jako "nie jest już dostarczana przez integrację").
+            start_dt = datetime.combine(current_date, _parse_hhmm(tmpl["start_time"])).replace(
+                tzinfo=dt_util.DEFAULT_TIME_ZONE
+            )
+            end_dt = datetime.combine(current_date, _parse_hhmm(tmpl["end_time"])).replace(
+                tzinfo=dt_util.DEFAULT_TIME_ZONE
+            )
             occurrences.append(
                 LessonOccurrence(
                     start=start_dt,
@@ -238,7 +246,7 @@ def build_student_schedule(
         occurrences=occurrences,
         tt_valid_text=valid_text,
         subject_colors=subject_colors,
-        generated_at=datetime.now(),
+        generated_at=dt_util.now(),
     )
 
 
@@ -282,7 +290,7 @@ class EdupagePlanCoordinator(DataUpdateCoordinator[StudentSchedule]):
         return build_student_schedule(tables, class_id, group_choices, color_overrides)
 
     def current_occurrence(self, now: datetime | None = None) -> LessonOccurrence | None:
-        now = now or datetime.now()
+        now = now or dt_util.now()
         if not self.data:
             return None
         for occ in self.data.occurrences:
@@ -291,7 +299,7 @@ class EdupagePlanCoordinator(DataUpdateCoordinator[StudentSchedule]):
         return None
 
     def next_occurrence(self, now: datetime | None = None) -> LessonOccurrence | None:
-        now = now or datetime.now()
+        now = now or dt_util.now()
         if not self.data:
             return None
         for occ in self.data.occurrences:
