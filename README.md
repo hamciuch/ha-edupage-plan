@@ -78,8 +78,21 @@ Dla każdego dziecka:
 | `sensor.aktualna_lekcja_<dziecko>` | Trwająca teraz lekcja (przedmiot, nauczyciel, sala, kolor, grupa) |
 | `sensor.nastepna_lekcja_<dziecko>` | Kolejna lekcja |
 | `sensor.godzina_obiadu_<dziecko>` | Godzina obiadu (jeśli skonfigurowano plik) |
+| `sensor.plan_tygodnia_<dziecko>` | Cały tydzień szkolny jako gotowa "siatka" (atrybuty `dni`/`siatka`/`legenda`) - do narysowania widoku w stylu papierowego planu lekcji, patrz niżej |
 | `calendar.zajecia_dodatkowe_bez_kolizji_<dziecko>` | Tylko jeśli skonfigurowano kalendarz dodatkowych zajęć |
 | `binary_sensor.kolizja_zajec_z_lekcja_<dziecko>` | Tylko jeśli skonfigurowano kalendarz dodatkowych zajęć |
+
+## Widok "papierowego" planu tygodnia
+
+Oprócz kalendarza HA (widok tygodnia/miesiąca), dashboard (`plan_lekcji_dashboard_raw.yaml`)
+zawiera drugi widok - "Plan tygodnia" - wzorowany na kolorowym plakacie planu lekcji,
+jaki drukuje szkoła: siatka dni x godzin, kolorowe pola per przedmiot, sala i
+nauczyciel w komórce, legenda kolorów na dole. Budowany jest kartą `markdown` +
+szablon Jinja czytający atrybuty `dni`/`siatka`/`legenda` z `sensor.plan_tygodnia_<dziecko>`
+(pogrupowane RAZ, po stronie integracji - patrz `sensor.py: build_week_grid` -
+bo dopasowanie "ta sama godzina w różnych dniach = jeden wiersz" jest niewygodne
+do policzenia samym szablonem). Nie wymaga żadnej dodatkowej konfiguracji ani
+custom-karty z HACS Frontend.
 
 ## Kolory przedmiotów
 
@@ -106,6 +119,51 @@ AKTUALNIE obowiązujący plan (nie trzyma sztywno starego numeru planu),
 więc jeśli szkoła opublikuje nowy plan (np. od nowego semestru albo po
 zmianie), zostanie on podchwycony automatycznie przy najbliższym
 odświeżeniu - nie trzeba nic przekonfigurowywać.
+
+### Diagnostyka: "plan pokazuje coś innego niż strona szkoły"
+
+Każda encja (kalendarz, sensory) ma trzy dodatkowe atrybuty (Developer Tools
+-> States), które od razu mówią, CZY i KIEDY integracja faktycznie ostatnio
+pobrała dane - bez grzebania w logu:
+
+- `ostatnia_aktualizacja` - kiedy integracja ostatnio SKUTECZNIE pobrała plan
+  z EduPage. Jeśli to jest sprzed wielu godzin mimo że powinno odświeżać się
+  co 3h - odświeżanie faktycznie stoi (sprawdź log pod kątem błędów,
+  Ustawienia -> System -> Logi).
+- `wersja_planu` - odcisk POLICZONY z dokładnie tych pól, z których składa
+  się plan TEGO dziecka: dzień tygodnia, godzina, przedmiot, nauczyciel,
+  sala, grupa - czyli dokładnie to, co widać "na oko" na planie i co
+  porównałbyś ręcznie ze stroną szkoły. **To jest właściwy atrybut do
+  sprawdzenia, czy Twój plan jest aktualny** - jeśli ten odcisk NIE zmienia
+  się mimo potwierdzonej zmiany na stronie szkoły (dla Twojego dziecka), to
+  realny problem po stronie integracji/EduPage.
+- `wersja_odpowiedzi_api` - odcisk całej surowej odpowiedzi EduPage (dla
+  WSZYSTKICH klas w szkole naraz). Może się zmieniać nawet wtedy, gdy
+  `wersja_planu` Twojego dziecka zostaje taka sama - bo zmieniło się coś w
+  planie innej klasy - i to jest normalne, nie błąd. Przydaje się tylko do
+  odróżnienia "EduPage w ogóle nic nie zwróciło innego" (oba odciski takie
+  same) od "zwróciło coś innego, ale nie dla Twojego dziecka" (tylko ten się
+  zmienił).
+
+Innymi słowy: patrz przede wszystkim na `wersja_planu` - jeśli on się nie
+rusza mimo pewności, że lekcja/godzina/nauczyciel Twojego dziecka się
+zmieniły na stronie szkoły, to jest sygnał do dalszego kopania (log +
+`wersja_odpowiedzi_api`, żeby sprawdzić czy to w ogóle dotarło od EduPage).
+
+Żeby zobaczyć to samo w logu (linia `EduPage (<subdomena>): pobrano plan
+tt_num=... fingerprint=...` przy każdym odświeżeniu - to akurat dalej odcisk
+całej odpowiedzi, nie per-dziecko), dodaj w `configuration.yaml`:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.edupage_plan: info
+```
+
+Zanim zaczniesz to diagnozować: sprawdź też, czy karta na dashboardzie po
+prostu nie pokazuje starego widoku, bo zakładka przeglądarki stoi otworem od
+dłuższego czasu (twardy refresh strony, Ctrl+F5, zanim uznasz że to backend).
 
 ## Ograniczenia / rzeczy do doszlifowania
 

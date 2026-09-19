@@ -1,6 +1,7 @@
 """DataUpdateCoordinator - pobiera plan EduPage i buduje plan lekcji jednego ucznia."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -57,6 +58,25 @@ class StudentSchedule:
     tt_valid_text: str | None
     subject_colors: dict[str, str]
     generated_at: datetime
+    # DIAGNOSTYKA "czy plan faktycznie się odświeża" - DWA różne odciski, celowo różnej
+    # "ziarnistości" (słuszna uwaga rodzica: odcisk całej odpowiedzi API nic nie mówi o
+    # tym, czy zmieniło się coś w PLANIE TEGO DZIECKA - może się zmienić z powodu innej
+    # klasy, innego nauczyciela, w ogóle niezwiązanej rzeczy w danych całej szkoły):
+    #
+    # - source_fingerprint: odcisk CAŁEJ surowej odpowiedzi EduPage (patrz
+    #   api.py: _fingerprint) - wszystkie klasy, przedmioty, nauczyciele naraz. Mówi
+    #   tylko "czy EduPage w ogóle zwróciło coś innego niż ostatnio", nie "czy to dotyczy
+    #   TEGO dziecka".
+    # - plan_fingerprint: odcisk POLICZONY z dokładnie tych samych pól, które faktycznie
+    #   trafiają do planu tego ucznia - dzień tygodnia, godzina start/koniec, przedmiot,
+    #   nauczyciel, sala, grupa (patrz _plan_fingerprint niżej) - dokładnie to, co rodzic
+    #   by porównał "ręcznie" patrząc na plan. To JEST właściwa odpowiedź na "czy coś się
+    #   zmieniło w moim planie": ten sam plan_fingerprint mimo potwierdzonej zmiany na
+    #   stronie szkoły oznacza realny problem (integracja nie widzi zmiany), a source_
+    #   fingerprint zmieniający się przy niezmienionym plan_fingerprint oznacza po prostu
+    #   że zmieniło się coś u innej klasy/przedmiotu - nie błąd.
+    source_fingerprint: str = ""
+    plan_fingerprint: str = ""
 
 
 def _decode_weekday(days_mask: str) -> int | None:
@@ -103,6 +123,42 @@ def _lesson_applies_to_student(
         return False, None
 
     return chosen_group_id in included_group_ids, None
+
+
+def _plan_fingerprint(weekday_occ_templates: dict[int, list[dict]]) -> str:
+    """Odcisk PLANU TEGO UCZNIA - dokładnie na podstawie tych pól, które by porównał rodzic:
+    dzień tygodnia, godzina start/koniec, przedmiot, nauczyciel, sala, grupa.
+
+    Celowo NIE jest to odcisk całej surowej odpowiedzi EduPage (patrz api.py: _fingerprint /
+    StudentSchedule.source_fingerprint) - ten mówiłby "czy EduPage zwróciło cokolwiek innego
+    niż ostatnio" dla CAŁEJ szkoły, a nie "czy zmieniło się coś w planie TEGO dziecka". Dwie
+    kolejne odpowiedzi EduPage mogą różnić się bajt w bajt (bo zmieniła się np. sala innej
+    klasy) - source_fingerprint się zmieni, ale plan_fingerprint TEGO ucznia zostanie taki
+    sam, bo jego plan faktycznie się nie zmienił. To jest ten drugi przypadek, który ma
+    znaczenie przy pytaniu "czy plan mojego dziecka jest aktualny".
+    """
+    parts = []
+    for weekday in sorted(weekday_occ_templates):
+        rows = sorted(
+            weekday_occ_templates[weekday],
+            key=lambda t: (t["start_time"], t["subject"], t["group_name"] or ""),
+        )
+        for tmpl in rows:
+            parts.append(
+                "|".join(
+                    [
+                        str(weekday),
+                        tmpl["start_time"],
+                        tmpl["end_time"],
+                        tmpl["subject"],
+                        tmpl["teacher"],
+                        tmpl["room"],
+                        tmpl["group_name"] or "",
+                    ]
+                )
+            )
+    raw = "\n".join(parts)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
 
 
 def get_class_divisions(tables: EdupageTables, class_id: str) -> list[dict]:
@@ -247,6 +303,8 @@ def build_student_schedule(
         tt_valid_text=valid_text,
         subject_colors=subject_colors,
         generated_at=dt_util.now(),
+        source_fingerprint=tables.fingerprint,
+        plan_fingerprint=_plan_fingerprint(weekday_occ_templates),
     )
 
 

@@ -65,14 +65,16 @@ views:
             name: Gabrysia
             icon: mdi:food
 
+      # Karta "Kalendarz" w tej wersji HA przyjmuje pod "entities" SAME stringi z ID
+      # encji (nie obiekty z osobnym "color:" - to starszy/inny schemat, którego
+      # edytor wizualny już nie obsługuje). Kolor per-kalendarz możesz i tak ustawić
+      # ręcznie: kliknij encję na liście w edytorze karty -> "Kolor".
       - type: calendar
         title: Plan lekcji — tydzień
         initial_view: dayGridWeek
         entities:
-          - entity: calendar.plan_lekcji_wiktor
-            color: "#3B82F6"
-          - entity: calendar.plan_lekcji_gabrysia
-            color: "#EC4899"
+          - calendar.plan_lekcji_wiktor
+          - calendar.plan_lekcji_gabrysia
 
       # --- Poniższe karty DOPISZ dopiero wtedy, gdy skonfigurujesz w opcjach
       # integracji "Kalendarz z dodatkowymi zajęciami" (CONF_EXTRA_CALENDAR_ENTITY)
@@ -116,7 +118,104 @@ views:
       #   title: Zajęcia dodatkowe (bez kolizji)
       #   initial_view: listWeek
       #   entities:
-      #     - entity: calendar.zajecia_dodatkowe_bez_kolizji_wiktor
-      #       color: "#3B82F6"
-      #     - entity: calendar.zajecia_dodatkowe_bez_kolizji_gabrysia
-      #       color: "#EC4899"
+      #     - calendar.zajecia_dodatkowe_bez_kolizji_wiktor
+      #     - calendar.zajecia_dodatkowe_bez_kolizji_gabrysia
+
+  # Drugi widok - "papierowy" plan tygodnia (siatka dni x godzin, kolorowe pola per
+  # przedmiot, sala/nauczyciel w komórce, legenda na dole) - wzorowany na plakacie
+  # planu lekcji, jaki dostaje się ze szkoły. Dane bierze z encji
+  # sensor.plan_tygodnia_<dziecko> (atrybuty "dni"/"siatka"/"legenda" - patrz
+  # sensor.py: EdupageWeekGridSensor/build_week_grid). Ta encja istnieje ZAWSZE,
+  # więc w przeciwieństwie do karty "Obiad" ten widok nie wymaga żadnej dodatkowej
+  # konfiguracji w opcjach integracji.
+  - title: Plan tygodnia
+    path: plan-tygodnia
+    icon: mdi:calendar-week
+    cards:
+      - type: markdown
+        title: 👦 Wiktor — plan tygodnia
+        content: >
+          {% set ent = 'sensor.plan_tygodnia_wiktor' %}
+          {% set dni = state_attr(ent, 'dni') or [] %}
+          {% set siatka = state_attr(ent, 'siatka') or [] %}
+          {% set legenda = state_attr(ent, 'legenda') or [] %}
+          {% if not siatka %}
+          Brak danych planu na ten tydzień.
+          {% else %}
+          <table style="width:100%; border-collapse:collapse; text-align:center; font-size:0.85em;">
+          <tr>
+            <th style="padding:4px;"></th>
+            {% for d in dni %}
+            <th style="padding:4px; border-bottom:2px solid var(--divider-color);">{{ d.nazwa }}<br><small>{{ d.data }}</small></th>
+            {% endfor %}
+          </tr>
+          {% for row in siatka %}
+          <tr>
+            <td style="padding:4px; white-space:nowrap; font-size:0.8em; color:var(--secondary-text-color);">{{ row.start }}<br>{{ row.koniec }}</td>
+            {% for cell in row.dni %}
+            {% if cell %}
+            <td style="padding:6px 4px; border-radius:8px; background:{{ cell.kolor }}33;">
+              <div style="font-weight:bold;">{{ cell.skrot }}</div>
+              {% if cell.sala %}<div style="font-size:0.8em;">s. {{ cell.sala }}</div>{% endif %}
+              {% if cell.nauczyciel %}<div style="font-size:0.75em; color:var(--secondary-text-color);">{{ cell.nauczyciel }}</div>{% endif %}
+            </td>
+            {% else %}
+            <td></td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+          </table>
+
+          {% if legenda %}
+          <div style="margin-top:10px; font-size:0.8em;">
+          {% for l in legenda %}
+          <span style="display:inline-block; margin:2px 8px 2px 0;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ l.kolor }};margin-right:4px;"></span>{{ l.skrot }} = {{ l.przedmiot }}</span>
+          {% endfor %}
+          </div>
+          {% endif %}
+          {% endif %}
+
+      - type: markdown
+        title: 👧 Gabrysia — plan tygodnia
+        content: >
+          {% set ent = 'sensor.plan_tygodnia_gabrysia' %}
+          {% set dni = state_attr(ent, 'dni') or [] %}
+          {% set siatka = state_attr(ent, 'siatka') or [] %}
+          {% set legenda = state_attr(ent, 'legenda') or [] %}
+          {% if not siatka %}
+          Brak danych planu na ten tydzień.
+          {% else %}
+          <table style="width:100%; border-collapse:collapse; text-align:center; font-size:0.85em;">
+          <tr>
+            <th style="padding:4px;"></th>
+            {% for d in dni %}
+            <th style="padding:4px; border-bottom:2px solid var(--divider-color);">{{ d.nazwa }}<br><small>{{ d.data }}</small></th>
+            {% endfor %}
+          </tr>
+          {% for row in siatka %}
+          <tr>
+            <td style="padding:4px; white-space:nowrap; font-size:0.8em; color:var(--secondary-text-color);">{{ row.start }}<br>{{ row.koniec }}</td>
+            {% for cell in row.dni %}
+            {% if cell %}
+            <td style="padding:6px 4px; border-radius:8px; background:{{ cell.kolor }}33;">
+              <div style="font-weight:bold;">{{ cell.skrot }}</div>
+              {% if cell.sala %}<div style="font-size:0.8em;">s. {{ cell.sala }}</div>{% endif %}
+              {% if cell.nauczyciel %}<div style="font-size:0.75em; color:var(--secondary-text-color);">{{ cell.nauczyciel }}</div>{% endif %}
+            </td>
+            {% else %}
+            <td></td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+          </table>
+
+          {% if legenda %}
+          <div style="margin-top:10px; font-size:0.8em;">
+          {% for l in legenda %}
+          <span style="display:inline-block; margin:2px 8px 2px 0;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ l.kolor }};margin-right:4px;"></span>{{ l.skrot }} = {{ l.przedmiot }}</span>
+          {% endfor %}
+          </div>
+          {% endif %}
+          {% endif %}

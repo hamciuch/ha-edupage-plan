@@ -74,6 +74,24 @@ class EdupagePlanCalendar(CalendarEntity):
         occ = self.coordinator.current_occurrence() or self.coordinator.next_occurrence()
         return _occ_to_event(occ) if occ else None
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        # DIAGNOSTYKA "czy plan faktycznie się odświeżył" (zgłoszenie: HA pokazywał plan
+        # sprzed zmiany szkoły) - widoczne w Developer Tools -> States bez grzebania w
+        # logu. `wersja_planu` to odcisk policzony z pól TEGO ucznia (dzień/godzina/
+        # przedmiot/nauczyciel/sala/grupa) - to on odpowiada na "czy mój plan jest
+        # aktualny". `wersja_odpowiedzi_api` to odcisk CAŁEJ odpowiedzi EduPage (może się
+        # zmieniać z powodu innej klasy, bez znaczenia dla tego dziecka). Patrz
+        # sensor.py: _diag_attrs / coordinator.py: _plan_fingerprint / api.py: _fingerprint.
+        data = self.coordinator.data
+        if data is None:
+            return {}
+        return {
+            "ostatnia_aktualizacja": data.generated_at.isoformat(),
+            "wersja_planu": data.plan_fingerprint or None,
+            "wersja_odpowiedzi_api": data.source_fingerprint or None,
+        }
+
     async def async_get_events(
         self, hass: HomeAssistant, start_date: datetime, end_date: datetime
     ) -> list[CalendarEvent]:
@@ -92,7 +110,7 @@ class EdupagePlanCalendar(CalendarEntity):
 class EdupageExtraActivitiesCalendar(CalendarEntity):
     """Widok kalendarza dodatkowych zajęć BEZ tych, które kolidują z lekcją.
 
-    Nie modyfikuje oryginalnego kalendarza użytkownika - kolidujące wydarzenia
+    Nie modyfikuje oryginalnego kalendarza użytkownika - koliduj±ce wydarzenia
     są tu po prostu pomijane (wygaszone). Zobacz też binary_sensor - kolizja.
     """
 

@@ -39,6 +39,8 @@ Ten moduł tylko POBIERA i parsuje surowe tabele - logikę łączenia
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import date
@@ -55,12 +57,34 @@ class EdupageApiError(Exception):
     """Błąd komunikacji z publicznym API EduPage."""
 
 
+def _fingerprint(raw_json: dict[str, Any]) -> str:
+    """Krótki odcisk palca surowej odpowiedzi - DIAGNOSTYKA "czy dane faktycznie się zmieniły".
+
+    Rodzic zgłosił, że HA pokazywał plan "sprzed zmiany" mimo cyklicznego odświeżania
+    co DEFAULT_SCAN_INTERVAL - nie wiadomo było, czy to integracja nie odpytuje EduPage
+    na czas, czy EduPage samo serwuje starą (buforowaną po swojej stronie) odpowiedź dla
+    stałego `__gsh: "00000000"`, czy to tylko przeglądarka na dashboardzie miała stary
+    widok karty kalendarza w pamięci. Ten fingerprint (razem z `generated_at` w
+    StudentSchedule, patrz coordinator.py) pozwala to odróżnić: jeśli w logu
+    (poziom INFO, patrz async_fetch_timetable) ten sam fingerprint powtarza się
+    godzinami mimo potwierdzonej zmiany na stronie szkoły - to znaczy, że EduPage
+    zwraca identyczną odpowiedź, czyli winne jest ich własne buforowanie, a nie ta
+    integracja.
+    """
+    try:
+        payload = json.dumps(raw_json, sort_keys=True, default=str).encode("utf-8")
+    except (TypeError, ValueError):
+        return "?"
+    return hashlib.sha1(payload).hexdigest()[:10]
+
+
 @dataclass
 class EdupageTables:
     """Sparsowane tabele planu lekcji jednej szkoły."""
 
     raw: dict[str, Any] = field(repr=False)
     tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    fingerprint: str = ""
 
     def rows(self, table_id: str) -> list[dict[str, Any]]:
         """Zwraca data_rows danej tabeli jako listę słowników (już z kluczami-nazwami pól)."""
@@ -99,7 +123,7 @@ def _parse_dbi_tables(raw_json: dict[str, Any]) -> EdupageTables:
             rows_out.append(item)
         parsed[table_id] = {"columns": columns, "rows": rows_out}
 
-    return EdupageTables(raw=raw_json, tables=parsed)
+    return EdupageTables(raw=raw_json, tables=parsed, fingerprint=_fingerprint(raw_json))
 
 
 def _current_school_year(today: date | None = None) -> int:
@@ -128,14 +152,28 @@ async def async_get_default_tt_num(session: aiohttp.ClientSession, subdomain: st
         data = await resp.json(content_type=None)
 
     if data.get("e") or data.get("reload"):
+        # "reload": True to sygnał z EduPage "Twoje dane/gsh są nieaktualne, zapytaj od nowa" -
+        # logujemy PEŁNĄ odpowiedź na WARNING (nie tylko skrót w wyjątku), bo to jeden z
+        # podejrzanych o objaw "HA pokazuje plan sprzed zmiany" (rodzic zgłosił 2026-09-18) -
+        # przyda się do porównania, czy to się faktycznie zdarza cyklicznie w logach.
+        _LOGGER.warning(
+            "EduPage odrzuciło getTTViewerData dla %s (reload=%s, e=%s): %s",
+            subdomain,
+            data.get("reload"),
+            data.get("e"),
+            data,
+        )
         raise EdupageApiError(
             f"EduPage odrzuciło zapytanie o aktualny plan (getTTViewerData): {data}"
         )
 
     try:
-        return data["r"]["regular"]["default_num"]
+        default_num = data["r"]["regular"]["default_num"]
     except (KeyError, TypeError) as err:
         raise EdupageApiError("Nie udało się odczytać numeru aktualnego planu (default_num)") from err
+
+    _LOGGER.info("EduPage (%s): aktualny numer planu (default_num) = %s", subdomain, default_num)
+    return default_num
 
 
 async def async_fetch_timetable(
@@ -162,12 +200,34 @@ async def async_fetch_timetable(
 
     if data.get("e") or data.get("reload"):
         # Serwer prosi o "świeże" zapytanie albo zwrócił błąd - najczęściej
-        # brakujący/niewłaściwy tt_num.
+        # brakujący/niewłaściwy tt_num. Logujemy pełną odpowiedź (patrz komentarz przy
+        # analogicznym sprawdzeniu w async_get_default_tt_num) - to jeden z podejrzanych
+        # o "HA pokazuje nieaktualny plan".
+        _LOGGER.warning(
+            "EduPage odrzuciło regularttGetData dla %s (tt_num=%s, reload=%s, e=%s): %s",
+            subdomain,
+            tt_num,
+            data.get("reload"),
+            data.get("e"),
+            data,
+        )
         raise EdupageApiError(
             f"EduPage odrzuciło zapytanie o plan lekcji (regularttGetData): {data}"
         )
 
-    return _parse_dbi_tables(data)
+    tables = _parse_dbi_tables(data)
+    # INFO (nie DEBUG) specjalnie - to jest GŁÓWNA linia do diagnozowania "plan się nie
+    # aktualizuje": jeśli w logu ten sam fingerprint powtarza się godzinami mimo
+    # potwierdzonej zmiany na stronie szkoły, to znaczy że EduPage serwuje tę samą
+    # (buforowaną po ich stronie) odpowiedź, a nie że ta integracja nie odpytuje na czas.
+    _LOGGER.info(
+        "EduPage (%s): pobrano plan tt_num=%s, %d tabel, fingerprint=%s",
+        subdomain,
+        tt_num,
+        len(tables.tables),
+        tables.fingerprint,
+    )
+    return tables
 
 
 async def async_list_classes(session: aiohttp.ClientSession, subdomain: str) -> list[dict[str, str]]:
