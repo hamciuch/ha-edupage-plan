@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
@@ -187,6 +188,37 @@ def get_class_divisions(tables: EdupageTables, class_id: str) -> list[dict]:
     return out
 
 
+def _subject_display_names(
+    subjects_by_id: dict[str, dict], used_subject_ids: set[str]
+) -> dict[str, str]:
+    """subjectid -> nazwa wyświetlana w kalendarzu/sensorach.
+
+    Szkoła może zdefiniować kilka RÓŻNYCH przedmiotów o tej samej pełnej nazwie i odróżniać
+    je tylko skrótem - typowo w klasach 1-3: "ew" (edukacja wczesnoszkolna) i "ewf" (to samo
+    pole "name", ale faktycznie WF). Widok szkolny pokazuje skrót, więc tam różnica jest widoczna;
+    my braliśmy samo `name`, przez co lekcja WF wyglądała jak zwykła edukacja wczesnoszkolna.
+    Gdy w planie TEGO ucznia dwa różne przedmioty mają tę samą nazwę, doklejamy skrót:
+    "edukacja wczesnoszkolna (ewf)". Nazwy unikalne zostają bez zmian (bez "(mat)" wszędzie).
+
+    Zliczamy tylko przedmioty z planu tego ucznia, nie całej szkoły - inaczej zmiana w planie
+    innej klasy zmieniałaby nazwy lekcji tego dziecka (i jego plan_fingerprint).
+    """
+    def base_name(subject: dict) -> str:
+        return (subject.get("name") or subject.get("short") or "?").strip()
+
+    counts = Counter(
+        base_name(subjects_by_id[sid]).casefold() for sid in used_subject_ids if sid in subjects_by_id
+    )
+    out: dict[str, str] = {}
+    for sid, subject in subjects_by_id.items():
+        name = base_name(subject)
+        short = (subject.get("short") or "").strip()
+        if counts.get(name.casefold(), 0) > 1 and short and short.casefold() != name.casefold():
+            name = f"{name} ({short})"
+        out[sid] = name
+    return out
+
+
 def build_student_schedule(
     tables: EdupageTables,
     class_id: str,
@@ -210,11 +242,6 @@ def build_student_schedule(
     class_row = classes_by_id.get(class_id, {})
     class_name = (class_row.get("short") or class_row.get("name") or class_id).strip()
 
-    subject_colors: dict[str, str] = {}
-    for subj in subjects_by_id.values():
-        name = subj.get("name") or subj.get("short") or ""
-        subject_colors[name] = color_overrides.get(name) or subj.get("color") or FALLBACK_COLOR
-
     # Prefiltrujemy lekcje dotyczące tej klasy i (jeśli trzeba) wybranej grupy - raz, nie per-dzień.
     relevant_lesson_ids: dict[str, str | None] = {}
     for lesson_id, lesson in lessons_by_id.items():
@@ -223,6 +250,21 @@ def build_student_schedule(
         applies, group_name = _lesson_applies_to_student(lesson, class_id, divisions_by_id, group_choices)
         if applies:
             relevant_lesson_ids[lesson_id] = group_name
+
+    used_subject_ids = {
+        lessons_by_id[lid].get("subjectid") for lid in relevant_lesson_ids if lessons_by_id[lid].get("subjectid")
+    }
+    display_names = _subject_display_names(subjects_by_id, used_subject_ids)
+
+    # Kolory kluczowane WYŚWIETLANĄ nazwą (rozróżnia "ew" od "ewf"). Nadpisanie kolorem po
+    # pełnej nazwie z opcji nadal działa (kompatybilność wsteczna) - wyświetlana nazwa ma pierwszeństwo.
+    subject_colors: dict[str, str] = {}
+    for sid, subj in subjects_by_id.items():
+        raw_name = subj.get("name") or subj.get("short") or ""
+        display = display_names[sid]
+        subject_colors[display] = (
+            color_overrides.get(display) or color_overrides.get(raw_name) or subj.get("color") or FALLBACK_COLOR
+        )
 
     weekday_occ_templates: dict[int, list[dict]] = {}
     for card in tables.rows("cards"):
@@ -238,7 +280,7 @@ def build_student_schedule(
 
         lesson = lessons_by_id[lesson_id]
         subject = subjects_by_id.get(lesson.get("subjectid"), {})
-        subject_name = subject.get("name") or subject.get("short") or "?"
+        subject_name = display_names.get(lesson.get("subjectid")) or subject.get("name") or subject.get("short") or "?"
         teacher_names = ", ".join(
             teachers_by_id[t].get("short", t) for t in (lesson.get("teacherids") or []) if t in teachers_by_id
         )
